@@ -52,7 +52,7 @@ fn get_data_from_rabbitmq(tx: mpsc::Sender<String>, stop_rx: watch::Receiver<()>
                 // println!("--> {:12} - Received data size: {}", "LOGGER", body.len());
                 if tx.send(body.to_string()).is_err() {
                     println!("Failed to send data to websocket");
-                    break;
+                    // break;
                 }
                 consumer.ack(delivery)?;
             }
