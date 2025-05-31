@@ -90,8 +90,8 @@ async fn handle_socket(socket: WebSocket) {
     });
 
     let send_task = tokio::spawn(async move {
-        let mut data_with_color = vec![];
         while let Ok(message) = rx.recv() {
+            let mut data_with_color = vec![];
             // Test
             match from_str::<MQData>(&message) {
                 Ok(mq_data) => {
