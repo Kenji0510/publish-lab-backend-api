@@ -16,6 +16,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::from_str;
 use tokio::sync::watch;
+use tower_http::cors::{Any, CorsLayer};
 
 #[derive(Deserialize, Debug)]
 struct MQData {
@@ -153,7 +154,9 @@ async fn handle_socket(socket: WebSocket) {
 async fn main() {
     println!("Hello, world!");
 
-    let app = Router::new().route("/ws", get(handle_ws));
+    let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any);
+
+    let app = Router::new().route("/ws", get(handle_ws)).layer(cors);
 
     println!("--> {:12} - started running server on port 8080", "INFO");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
