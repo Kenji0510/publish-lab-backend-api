@@ -52,6 +52,7 @@ fn get_data_from_rabbitmq(tx: mpsc::Sender<String>, stop_rx: watch::Receiver<()>
                 // println!("--> {:12} - Received data size: {}", "LOGGER", body.len());
                 if tx.send(body.to_string()).is_err() {
                     println!("Failed to send data to websocket");
+                    break;
                 }
                 consumer.ack(delivery)?;
             }
@@ -88,6 +89,7 @@ async fn handle_socket(socket: WebSocket) {
     });
 
     let send_task = tokio::spawn(async move {
+        let mut data_with_color = vec![];
         while let Ok(message) = rx.recv() {
             // Test
             match from_str::<MQData>(&message) {
@@ -95,6 +97,15 @@ async fn handle_socket(socket: WebSocket) {
                     println!("--> {:12} - Deserialized data from RabbitMQ", "LOGGER");
                     println!("Num points: {:?}", mq_data.num_points);
                     println!("Data: {:?}", mq_data.points[0]);
+
+                    let points_vec = &mq_data.points;
+
+                    for chunk in points_vec.chunks(3) {
+                        if chunk.len() == 3 {
+                            data_with_color.extend_from_slice(chunk);
+                            data_with_color.extend_from_slice(&[0.0, 1.0, 0.0]);
+                        }
+                    }
                 }
                 Err(e) => {
                     println!(
@@ -104,9 +115,18 @@ async fn handle_socket(socket: WebSocket) {
                     println!("Error: {:?}", e);
                 }
             }
-            if sender.send(Message::Text(message)).await.is_err() {
-                println!("--> {:12} - Failed to send message to client", "LOGGER");
-                break;
+            // if sender.send(Message::Text(message)).await.is_err() {
+            //     println!("--> {:12} - Failed to send message to client", "LOGGER");
+            //     break;
+            // }
+            if sender
+                .send(Message::Binary(
+                    bytemuck::cast_slice(&data_with_color).to_vec(),
+                ))
+                .await
+                .is_err()
+            {
+                println!("--> {:12} - Failed to send binary data", "LOGGER");
             }
         }
     });
