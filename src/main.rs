@@ -25,7 +25,10 @@ struct MQData {
     points: Vec<f64>,
 }
 
-fn get_data_from_rabbitmq(tx: mpsc::Sender<String>, stop_rx: watch::Receiver<()>) -> Result<()> {
+fn get_data_from_rabbitmq(
+    tx: mpsc::SyncSender<String>,
+    stop_rx: watch::Receiver<()>,
+) -> Result<()> {
     let mut connection = Connection::insecure_open("amqp://user:password@192.168.100.200")?;
     // .expect("Failed to connect to RabbitMQ");
     let channel = connection.open_channel(None)?;
@@ -80,17 +83,24 @@ async fn handle_socket(socket: WebSocket) {
 
     let (mut sender, mut receiver) = socket.split();
 
-    let (tx, rx) = mpsc::channel::<String>();
+    let (tx, rx) = mpsc::sync_channel::<String>(5);
     let (stop_tx, stop_rx) = watch::channel(());
+    let stop_rx_for_rabbit = stop_rx.clone();
+    let stop_rx_for_send = stop_rx.clone();
 
-    let rabbitma_task = tokio::spawn(async move {
-        if let Err(e) = get_data_from_rabbitmq(tx, stop_rx) {
+    let rabbitmq_task = tokio::task::spawn_blocking(move || {
+        if let Err(e) = get_data_from_rabbitmq(tx, stop_rx_for_rabbit) {
             eprintln!("Error in RabbitMQ thread: {:?}", e);
         }
     });
 
     let send_task = tokio::spawn(async move {
         while let Ok(message) = rx.recv() {
+            if stop_rx_for_send.has_changed().unwrap_or(false) {
+                println!("--> {:12} - Detected stop signal in send_task", "LOGGER");
+                break;
+            }
+
             let mut data_with_color = vec![];
             // Test
             match from_str::<MQData>(&message) {
@@ -131,23 +141,34 @@ async fn handle_socket(socket: WebSocket) {
             }
         }
     });
-    while let Some(Ok(msg)) = receiver.next().await {
-        match msg {
-            axum::extract::ws::Message::Text(req_data) => {
-                println!("--> {:12} - Received data from client", "LOGGER");
-                println!("Data: {}", req_data);
+    loop {
+        match receiver.next().await {
+            Some(Ok(msg)) => match msg {
+                axum::extract::ws::Message::Text(req_data) => {
+                    println!("--> {:12} - Received data from client", "LOGGER");
+                    println!("Data: {}", req_data);
+                }
+                axum::extract::ws::Message::Close(_) => {
+                    println!("--> {:12} - Closing websocket connection", "LOGGER");
+                    break;
+                }
+                _ => {}
+            },
+            Some(Err(e)) => {
+                println!("--> {:12} - Websocket error: {:?}", "LOGGER", e);
+                break;
             }
-            axum::extract::ws::Message::Close(_) => break,
-            _ => {}
+            None => {
+                println!("--> {:12} - Websocket stream closed (None)", "LOGGER");
+                break;
+            }
         }
     }
-
-    println!("--> {:12} - Closing websocket connection", "LOGGER");
 
     let _ = stop_tx.send(());
 
     send_task.await.unwrap();
-    rabbitma_task.await.unwrap();
+    rabbitmq_task.await.unwrap();
 }
 
 #[tokio::main]
