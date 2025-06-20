@@ -18,11 +18,16 @@ use serde_json::from_str;
 use tokio::sync::watch;
 use tower_http::cors::{Any, CorsLayer};
 
+// struct MQData {
+//     num_points: usize,
+//     color: String,
+//     points: Vec<f64>,
+// }
 #[derive(Deserialize, Debug)]
 struct MQData {
     num_points: usize,
-    color: String,
-    points: Vec<f64>,
+    points: Vec<[f64; 3]>,
+    colors: Vec<[f64; 3]>,
 }
 
 fn get_data_from_rabbitmq(
@@ -107,15 +112,12 @@ async fn handle_socket(socket: WebSocket) {
                 Ok(mq_data) => {
                     println!("--> {:12} - Deserialized data from RabbitMQ", "LOGGER");
                     println!("Num points: {:?}", mq_data.num_points);
-                    println!("Data: {:?}", mq_data.points[0]);
+                    println!("Point[0]: {:?}", mq_data.points[0]);
+                    println!("Color[0]: {:?}", mq_data.colors[0]);
 
-                    let points_vec = &mq_data.points;
-
-                    for chunk in points_vec.chunks(3) {
-                        if chunk.len() == 3 {
-                            data_with_color.extend_from_slice(chunk);
-                            data_with_color.extend_from_slice(&[0.0, 1.0, 0.0]);
-                        }
+                    for (pt, col) in mq_data.points.iter().zip(mq_data.colors.iter()) {
+                        data_with_color.extend_from_slice(pt);
+                        data_with_color.extend_from_slice(col);
                     }
                 }
                 Err(e) => {
